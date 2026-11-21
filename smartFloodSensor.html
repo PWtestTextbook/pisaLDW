@@ -2279,6 +2279,8 @@ document.addEventListener("DOMContentLoaded", ()=>{
   }
 })();
 </script>
+
+
 <script>
 /* ===================================================================
    PISA Review & History module (auto-added)
@@ -2307,7 +2309,7 @@ var res = (ctx.S.apply || {}).results || {};
 acts.forEach(function (a, i) {
   var v = res[a.id];
   if (v === undefined || v === null) return;
-  ctx.push({stage:'APPLY', kind:'apply', q:a.title || ('กิจกรรมที่ ' + (i+1)),
+  ctx.push({stage:'APPLY', kind:'apply', docNum:i+1, q:a.title || ('กิจกรรมที่ ' + (i+1)),
     answer:'ผลการทดสอบหลังตั้งค่า — ' + (typeof v === 'object' ? ctx.fmt(v) : ('ได้ ' + ctx.fmt(v) + '%')),
     score:ctx.num(typeof v === 'object' ? (v.score !== undefined ? v.score : v.accuracy) : v)});
 });
@@ -2344,6 +2346,12 @@ Object.keys(la).forEach(function (k) {
   }
   function squash(s) { return norm(s).toLowerCase().replace(/[\s"'“”‘’.,!?()[\]{}:;/\\-]/g, ""); }
   function clip(s, n) { s = norm(s); return s.length > n ? s.slice(0, n) + "…" : s; }
+  /* เหมือน clip แต่คงการขึ้นบรรทัดใหม่ไว้ (ใช้กับคำตอบแบบเรียงลำดับ/หลายบรรทัด) */
+  function clipML(s, n) {
+    s = String(s == null ? "" : s).replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ")
+         .replace(/\n{3,}/g, "\n\n").trim();
+    return s.length > n ? s.slice(0, n) + "…" : s;
+  }
   function esc(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -2453,6 +2461,12 @@ Object.keys(la).forEach(function (k) {
   /* ---------- เฉลย/รูบริคตามคู่มือเฉลย ---------- */
   function docItemFor(row) {
     if (!DOCKEY || !DOCKEY.i) return null;
+    /* แถวที่รู้เลขข้อในคู่มือเฉลยแน่นอน (เช่น กิจกรรมที่ 1 ของขั้น APPLY) */
+    if (row.docNum && row.stage) {
+      for (var d = 0; d < DOCKEY.i.length; d++) {
+        if (DOCKEY.i[d].s === row.stage && DOCKEY.i[d].n === row.docNum) return DOCKEY.i[d];
+      }
+    }
     if (row.bankKey && DOCKEY.m && DOCKEY.m[row.bankKey] !== undefined) {
       return DOCKEY.i[DOCKEY.m[row.bankKey]] || null;
     }
@@ -2470,27 +2484,10 @@ Object.keys(la).forEach(function (k) {
   }
   function docBlockFor(row) {
     if (!DOCKEY || !DOCKEY.i) return "";
-    /* 1) ข้อที่จับคู่กับคลังข้อสอบได้ - ใช้การจับคู่ที่ตรวจทานไว้แล้ว */
-    if (row.bankKey && DOCKEY.m && DOCKEY.m[row.bankKey] !== undefined) {
-      var b = DOCKEY.i[DOCKEY.m[row.bankKey]];
-      if (b) return b.t;
-    }
-    /* 2) ค้นจากข้อความโจทย์หรือคำตอบที่ผู้เข้าสอบเลือก */
-    var qs = squash(row.q), as = squash(row.answer);
-    if (DOCKEY.q) {
-      for (var i = 0; i < DOCKEY.q.length; i++) {
-        var hay = DOCKEY.q[i];
-        if (!hay) continue;
-        if (qs.length > 18 && hay.indexOf(qs.slice(0, 36)) > -1) return DOCKEY.i[i].t;
-      }
-      for (var j = 0; j < DOCKEY.q.length; j++) {
-        var hay2 = DOCKEY.q[j];
-        if (!hay2) continue;
-        if (as.length > 10 && hay2.indexOf(as.slice(0, 26)) > -1 &&
-            (!row.stage || !DOCKEY.i[j].s || DOCKEY.i[j].s === row.stage)) return DOCKEY.i[j].t;
-      }
-    }
-    /* 3) เกณฑ์ระดับขั้นตอน แล้วจึงรูบริคอัตนัยส่วนท้ายเอกสาร */
+    /* ใช้ตัวจับคู่ชุดเดียวกับ docItemFor (เลขข้อในคู่มือ → คลังข้อสอบ → ข้อความ) */
+    var hit = docItemFor(row);
+    if (hit && hit.t) return hit.t;
+    /* เกณฑ์ระดับขั้นตอน แล้วจึงรูบริคอัตนัยส่วนท้ายเอกสาร */
     if (DOCKEY.st && row.stage && DOCKEY.st[row.stage]) return DOCKEY.st[row.stage];
     if (row.kind === "text" && DOCKEY.rb) return DOCKEY.rb;
     return "";
@@ -2584,8 +2581,14 @@ Object.keys(la).forEach(function (k) {
 
   /* ปุ่มนำทาง/ปุ่มระบบ - ไม่ใช่คำตอบ (ตรวจแบบ "มีคำนี้อยู่" กับข้อความสั้น ๆ
      เพื่อให้ครอบคลุมคำอย่าง "ข้อถัดไป" หรือ "▶ ถัดไป" ด้วย) */
-  var NAV_WORDS = /(ถัดไป|ต่อไป|ย้อนกลับ|ก่อนหน้า|เริ่ม|บันทึก|ส่งผล|ส่งคำตอบ|ตรวจคำตอบ|ตรวจสอบ|รีเซ็ต|เคลียร์|ล้าง|ปิด|ตกลง|ยืนยัน|ดาวน์โหลด|พิมพ์|ทำอีกครั้ง|กลับสู่หน้าหลัก|เข้าสู่ระบบ|ดูเฉลย|แนวคำตอบ|รัน|run|reset|next|back|start|close|submit|ย้อนดูประวัติ|ออกจากโหมด)/i;
-  function isNav(t) { return t.length <= 30 && NAV_WORDS.test(t); }
+  var NAV_WORDS = /(ถัดไป|ต่อไป|ไปขั้นตอน|ขั้นตอนถัดไป|ไปต่อ|ย้อนกลับ|ก่อนหน้า|เริ่ม|บันทึก|ส่งผล|ส่งคำตอบ|ตรวจคำตอบ|ตรวจสอบ|รีเซ็ต|เคลียร์|ล้าง|ปิด|ตกลง|ยืนยัน|ดาวน์โหลด|พิมพ์|ทำอีกครั้ง|กลับสู่หน้าหลัก|กลับไป|เข้าสู่ระบบ|ดูเฉลย|ดูผล|สรุปผล|รายงานผล|แนวคำตอบ|รัน|run|reset|next|back|start|close|submit|ย้อนดูประวัติ|ออกจากโหมด)/i;
+  function isNav(t) {
+    if (t.length <= 44 && NAV_WORDS.test(t)) return true;
+    /* ปุ่มนำทางมักลงท้ายด้วยลูกศร เช่น "ไปขั้นตอน REFLECT →" */
+    if (t.length <= 44 && /[→➔»▶›]\s*$/.test(t)) return true;
+    if (t.length <= 44 && /^[←◀‹]/.test(t)) return true;
+    return false;
+  }
 
   function nearestQuestionText(el) {
     var node = el, hops = 0;
@@ -2648,17 +2651,31 @@ Object.keys(la).forEach(function (k) {
   }
 
   /* เก็บข้อความเฉลย/ผลตรวจที่ตัวแบบทดสอบแสดงเองหลังเลือกคำตอบ */
+  /* อ่านเฉพาะข้อความที่ผู้ใช้เห็นจริง ตัด <script>/<style> ออก */
+  function textOf(node) {
+    try {
+      var c = node.cloneNode(true);
+      var junk = c.querySelectorAll("script,style,noscript,canvas,svg");
+      for (var i = 0; i < junk.length; i++) junk[i].remove();
+      return c.textContent || "";
+    } catch (e) { return ""; }
+  }
+  /* ข้อความที่หน้าตาเป็นซอร์สโค้ด ไม่ใช่คำอธิบายเชิงวิชาการ */
+  function looksLikeCode(t) {
+    if (!t) return false;
+    return /(function\s*\(|=>|document\.|querySelector|getElementById|await |const |let |var |JSON\.|addEventListener|\{\s*\}|;\s*\})/.test(t);
+  }
   function captureFeedback(el, row) {
     setTimeout(function () {
       try {
         var box = el.closest ? el.closest("div,li,section,form") : null;
         for (var hop = 0; box && hop < 4; hop++) {
-          var t = norm(box.textContent);
+          var t = norm(textOf(box));
           var m = t.match(/(ถูกต้อง|ไม่ถูกต้อง|ยังไม่ถูก|คำอธิบาย|เฉลย|แนวคำตอบ)[\s:：]*([^]{0,300})/);
           if (m) {
             if (!row.verdict && /^(ถูกต้อง)/.test(m[1])) row.verdict = "ถูก";
             if (!row.verdict && /^(ไม่ถูกต้อง|ยังไม่ถูก)/.test(m[1])) row.verdict = "ผิด";
-            if (!row.explain) row.explain = clip(m[0], 320);
+            if (!row.explain && !looksLikeCode(m[0])) row.explain = clip(m[0], 320);
             return;
           }
           box = box.parentElement;
@@ -2761,7 +2778,7 @@ Object.keys(la).forEach(function (k) {
         scores: scores || {},
         rows: allRows().map(function (r) {
           return { stage: r.stage, kind: r.kind, bankKey: r.bankKey || "", score: (r.score == null ? null : r.score), q: clip(r.q, 300),
-                   answer: clip(r.answer, 1200), correctText: clip(r.correctText, 300),
+                   answer: clipML(r.answer, 1600), correctText: clipML(r.correctText, 600),
                    verdict: r.verdict, explain: clip(r.explain, 600) };
         })
       });
@@ -2908,6 +2925,7 @@ Object.keys(la).forEach(function (k) {
   function labelFor(r) {
     /* ถ้าข้อความโจทย์ที่จับได้เป็นเพียงหัวข้อสั้น ๆ ให้เติมเลขข้อจากคู่มือเฉลยกำกับไว้ */
     var q = r.q || "";
+    if (/^(ข้อ|กิจกรรม|ภาระงาน|ภารกิจ|คำถาม)/.test(q)) return q;   /* มีเลขข้อ/ชื่อภาระงานอยู่แล้ว */
     if (q.length < 46 && !/[?？]$/.test(q)) {
       var d = docItemFor(r);
       if (d && d.n) return "ข้อ " + d.n + " · " + q;
@@ -2921,35 +2939,40 @@ Object.keys(la).forEach(function (k) {
       ' <span class="pr-chip">' + list.length + ' รายการ</span></h4>';
     if (!list.length) {
       if (sc != null) {
+        var noKey0 = (stage === "REFLECT");
         return head +
           '<table><thead><tr><th class="pr-no">ข้อ</th><th>โจทย์ / ภาระงาน</th>' +
-          '<th>คำตอบของผู้เข้าสอบ</th><th>ผลการตรวจ</th><th>แนวคำตอบ / เฉลย</th></tr></thead><tbody>' +
+          '<th>คำตอบของผู้เข้าสอบ</th><th>ผลการตรวจ</th>' +
+          (noKey0 ? '' : '<th>แนวคำตอบ / เฉลย</th>') + '</tr></thead><tbody>' +
           '<tr><td class="pr-no">1</td>' +
-          '<td>ภาระงานเชิงปฏิบัติของขั้นตอนนี้ (ต่อวงจร / เขียนบล็อกคำสั่ง / ปรับพารามิเตอร์ / ผังงาน)</td>' +
-          '<td class="pr-ans">ทำภาระงานในระบบจำลอง</td>' +
+          '<td>' + (noKey0 ? 'แบบประเมินตนเองของขั้นตอนนี้' :
+                   'ภาระงานเชิงปฏิบัติของขั้นตอนนี้ (ต่อวงจร / เขียนบล็อกคำสั่ง / ปรับพารามิเตอร์ / ผังงาน)') + '</td>' +
+          '<td class="pr-ans">' + (noKey0 ? 'ตอบแบบประเมินตนเองแล้ว' : 'ทำภาระงานในระบบจำลอง') + '</td>' +
           '<td><span class="pr-v na">ได้ ' + sc + '%</span></td>' +
-          '<td>' + (function () {
+          (noKey0 ? '' : '<td>' + (function () {
             var dt = stageDocText(stage);
             if (!dt) return '<span style="color:#9aa3b5;">ระบบให้คะแนนจากผลการปฏิบัติในระบบจำลอง</span>';
             var kid = idPrefix + "-stage-" + stage;
             return '<button type="button" class="pr-toggle" data-key="' + kid + '">ดูเกณฑ์การให้คะแนน</button>' +
                    '<div class="pr-key" id="' + kid + '">' + esc(dt) + '</div>';
-          })() + '</td></tr>' +
+          })() + '</td>') + '</tr>' +
           '</tbody></table>';
       }
       return head + '<div class="pr-empty">ไม่มีข้อมูลการตอบที่บันทึกไว้ในขั้นตอนนี้</div>';
     }
+    /* REFLECT คือการประเมินตนเอง ไม่มีเฉลย จึงไม่ต้องมีคอลัมน์แนวคำตอบ */
+    var noKey = (stage === "REFLECT");
     var html = head + '<table><thead><tr>' +
       '<th class="pr-no">ข้อ</th><th>โจทย์ / ภาระงาน</th><th>คำตอบของผู้เข้าสอบ</th>' +
-      '<th>ผลการตรวจ</th><th>แนวคำตอบ / เฉลย</th></tr></thead><tbody>';
+      '<th>ผลการตรวจ</th>' + (noKey ? '' : '<th>แนวคำตอบ / เฉลย</th>') + '</tr></thead><tbody>';
     for (var i = 0; i < list.length; i++) {
       var r = list[i];
       var keyId = idPrefix + "-" + stage + "-" + i;
-      /* ใช้เฉลย/รูบริคจากคู่มือเฉลย (.docx) เป็นหลัก ตามที่กำหนดไว้ */
-      var keyText = docBlockFor(r);
-      if (!keyText) {
-        if (r.correctText) keyText += "เฉลย: " + r.correctText;
-        if (r.explain) keyText += (keyText ? "\n" : "") + r.explain;
+      /* ขั้น REFLECT เป็นการประเมินตนเอง ไม่มีคำตอบถูก-ผิด จึงแสดงเฉพาะคำตอบของผู้เข้าสอบ */
+      var keyText = (stage === "REFLECT") ? "" : docBlockFor(r);
+      if (!keyText && stage !== "REFLECT") {
+        if (r.correctText) keyText += "เฉลย:\n" + clipML(r.correctText, 600);
+        if (r.explain && !looksLikeCode(r.explain)) keyText += (keyText ? "\n" : "") + r.explain;
       }
       var keyCell = keyText
         ? '<button type="button" class="pr-toggle" data-key="' + keyId + '">ดูแนวคำตอบ</button>' +
@@ -2959,9 +2982,9 @@ Object.keys(la).forEach(function (k) {
         '<td class="pr-no">' + (i + 1) + '</td>' +
         '<td>' + esc(clip(labelFor(r), 260)) + '</td>' +
         '<td class="pr-ans ' + (/\n/.test(r.answer || "") || r.kind === "text" ? "pr-txt" : "") + '">' +
-          esc(clip(r.answer, 1400)) + '</td>' +
+          esc(clipML(r.answer, 1600)) + '</td>' +
         '<td>' + verdictHTML(r) + '</td>' +
-        '<td>' + keyCell + '</td>' +
+        (noKey ? '' : '<td>' + keyCell + '</td>') +
         '</tr>';
     }
     return html + '</tbody></table>';
